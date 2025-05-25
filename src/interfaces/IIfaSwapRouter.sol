@@ -13,6 +13,9 @@ interface IIfaSwapRouter {
     error INSUFFICIENT_B_AMOUNT();
     error INSUFFICIENT_OUTPUT_AMOUNT();
     error EXCESSIVE_INPUT_AMOUNT();
+    error AssetPriceNotSetInOracle();
+    error RouterAssetNotSetForTokenA();
+    error RouterAssetNotSetForTokenB();
 
     /// @notice Adds liquidity to a token pair
     /// @param tokenA Address of token A

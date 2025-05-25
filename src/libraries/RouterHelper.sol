@@ -20,9 +20,6 @@ library RouterHelper {
     uint256 constant FEE_NUMERATOR = 6;
     uint256 constant STALENESS_THRESHOLD = 1 hours;
 
-    function abs(int256 x) internal pure returns (uint256) {
-        return uint256(x >= 0 ? x : -x);
-    }
     // returns sorted token addresses, used to handle return values from pairs sorted in this order
 
     function sortTokens(address tokenA, address tokenB) internal pure returns (address token0, address token1) {

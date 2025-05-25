@@ -39,6 +39,11 @@ interface IIfaSwapPair is IIfaSwapERC20 {
         address indexed to
     );
 
+    /// @notice Emitted when reserves are updated
+    /// @param reserve0 The new reserve0 amount (scaled to uint112)
+    /// @param reserve1 The new reserve1 amount (scaled to uint112)
+    event Sync(uint112 reserve0, uint112 reserve1);
+
     /*//////////////////////////////////////////////////////////////
                                 ERRORS
     //////////////////////////////////////////////////////////////*/
@@ -78,6 +83,9 @@ interface IIfaSwapPair is IIfaSwapERC20 {
 
     /// @notice Thrown when a restricted function is accessed by an unauthorized address
     error UnAuthorized();
+
+    /// @notice Thrown when requested output amount exceeds current reserves
+    error InsufficientLiquidityForOutput();
 
     /*//////////////////////////////////////////////////////////////
                                 FUNCTIONS

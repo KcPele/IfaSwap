@@ -9,6 +9,7 @@ import "./interfaces/IIfaSwapFactory.sol";
 import "./libraries/RouterHelper.sol";
 import {IERC20} from "./interfaces/IERC20.sol";
 import {TransferHelper} from "./libraries/TransferHelper.sol";
+import {Math} from "./libraries/Math.sol";
 
 import "./interfaces/IWETH.sol";
 
@@ -256,29 +257,35 @@ contract IfaSwapRouter is IIfaSwapRouter {
     }
 
     // given some amount of an asset and pair reserves, returns an equivalent amount of the other asset
-    function quote(uint256 amountA, address tokenA, address tokenB) public view override returns (uint256) {
+    function quote(uint256 amountA, address tokenA, address tokenB) public view override returns (uint256 amountB) {
         bytes32 assetIdA = priceFeeds[tokenA];
         bytes32 assetIdB = priceFeeds[tokenB];
 
-        (IIfaPriceFeed.DerviedPair memory pairInfo) =
+        require(assetIdA != bytes32(0), RouterAssetNotSetForTokenA());
+        require(assetIdB != bytes32(0), RouterAssetNotSetForTokenB());
+
+        IIfaPriceFeed.DerviedPair memory pairInfo =
             IIfaPriceFeed(priceFeedAddress).getPairbyId(assetIdA, assetIdB, IIfaPriceFeed.PairDirection.Forward);
 
         require(block.timestamp - pairInfo.lastUpdateTime <= STALENESS_THRESHOLD, PRICE_FEED_STALE());
-        require(pairInfo.derivedPrice > 0, ASSET_NOT_SET());
+        require(pairInfo.derivedPrice > 0, AssetPriceNotSetInOracle());
 
-        uint256 scaledTokenPrice = pairInfo.derivedPrice / (10 ** 12); // the pair is rasie to power of -30 so we are scale it down to -18
+        // Normalize pairInfo.derivedPrice from 1e30 to 1e18
+        uint256 scaledTokenPrice = pairInfo.derivedPrice / (10 ** 12);
 
-        uint256 tokenADecimalDelta = IERC20(tokenA).decimals();
-        uint256 tokenBDecimalDelta = IERC20(tokenB).decimals();
-
-        int256 decimalDelta = int256(tokenBDecimalDelta) - int256(tokenADecimalDelta); // make abs
+        uint256 tokenADecimals = IERC20(tokenA).decimals();
+        uint256 tokenBDecimals = IERC20(tokenB).decimals();
+        int256 decimalDelta = int256(tokenBDecimals) - int256(tokenADecimals);
 
         if (decimalDelta > 0) {
             scaledTokenPrice = scaledTokenPrice * (10 ** uint256(decimalDelta));
-        } else {
-            scaledTokenPrice = scaledTokenPrice / (10 ** RouterHelper.abs(decimalDelta));
+        } else if (decimalDelta < 0) {
+            scaledTokenPrice = scaledTokenPrice / (10 ** Math.abs(decimalDelta));
         }
-        return amountA * scaledTokenPrice / 10 ** 18;
+        // If decimalDelta is 0, scaledTokenPrice remains unchanged.
+
+        amountB = (amountA * scaledTokenPrice) / (10 ** 18);
+        return amountB;
     }
 
     function getAmountOut(uint256 amountIn, address tokenIn, address tokenOut)
@@ -288,17 +295,45 @@ contract IfaSwapRouter is IIfaSwapRouter {
         returns (uint256 amountOut)
     {
         uint256 amount = quote(amountIn, tokenIn, tokenOut);
-        amountOut = amount * 994 / 1000;
+        amountOut = amount * (RouterHelper.FEE_DENOMINATOR - RouterHelper.FEE_NUMERATOR) / RouterHelper.FEE_DENOMINATOR;
     }
 
     function getAmountIn(uint256 amountOut, address tokenIn, address tokenOut)
         public
         view
         override
-        returns (uint256 amountIn)
+        returns (uint256 finalAmountIn)
     {
-        uint256 amount = quote(amountOut, tokenIn, tokenOut);
-        amountIn = amount * 1000 / 994;
+        bytes32 assetIdIn = priceFeeds[tokenIn];
+        bytes32 assetIdOut = priceFeeds[tokenOut];
+
+        require(assetIdIn != bytes32(0) && assetIdOut != bytes32(0), ASSET_NOT_SET());
+
+        IIfaPriceFeed.DerviedPair memory pairInfo =
+            IIfaPriceFeed(priceFeedAddress).getPairbyId(assetIdOut, assetIdIn, IIfaPriceFeed.PairDirection.Forward);
+
+        require(block.timestamp - pairInfo.lastUpdateTime <= STALENESS_THRESHOLD, PRICE_FEED_STALE());
+        require(pairInfo.derivedPrice > 0, AssetPriceNotSetInOracle());
+
+        // Normalize pairInfo.derivedPrice from 1e30 to 1e18
+        uint256 scaledTokenPrice = pairInfo.derivedPrice / (10 ** 12);
+
+        uint256 tokenOutDecimals = IERC20(tokenOut).decimals();
+        uint256 tokenInDecimals = IERC20(tokenIn).decimals();
+        int256 decimalDelta = int256(tokenInDecimals) - int256(tokenOutDecimals);
+
+        if (decimalDelta > 0) {
+            scaledTokenPrice = scaledTokenPrice * (10 ** uint256(decimalDelta));
+        } else if (decimalDelta < 0) {
+            scaledTokenPrice = scaledTokenPrice / (10 ** Math.abs(decimalDelta));
+        }
+        // If decimalDelta is 0, scaledTokenPrice remains unchanged.
+
+        // rawAmountIn should be at tokenInDecimals
+        uint256 rawAmountIn = (amountOut * scaledTokenPrice) / (10 ** 18);
+
+        finalAmountIn = rawAmountIn * RouterHelper.FEE_DENOMINATOR / (RouterHelper.FEE_DENOMINATOR - RouterHelper.FEE_NUMERATOR);
+        return finalAmountIn;
     }
 
     // performs chained getAmountOut calculations on any number of pairs
